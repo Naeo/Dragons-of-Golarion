@@ -460,7 +460,7 @@ def main():
     # transcription needed.
     if args.script == "medeival_runes":
         text = clean_text(orig.lower(), CLEANERS[args.script])
-        text = simple_transliterate(text.lower(), IPAS[args.language], KEEPABLES[args.language])
+        text = simple_transliterate(text.lower(), IPAS[args.script], KEEPABLES[args.script])
         return text, args.outfile
     
     # Split at newlines--eSpeak does line breaks at prosodic boundaries,
