@@ -459,7 +459,7 @@ def main():
     # a letter-by-letter substitution on the raw text--no eSpeak
     # transcription needed.
     if args.script == "medeival_runes":
-        text = clean_text(orig.lower(), CLEANERS[args.language])
+        text = clean_text(orig.lower(), CLEANERS[args.script])
         text = simple_transliterate(text.lower(), IPAS[args.language], KEEPABLES[args.language])
         return text, args.outfile
     
