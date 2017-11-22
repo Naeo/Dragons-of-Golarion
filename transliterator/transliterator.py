@@ -169,7 +169,6 @@ def main():
             warnings.warn("--script medeival_runes not supported with --ipa.  Please pass raw English text.")
             exit(1)
         text = clean_text(orig.lower(), CLEANERS[args.script])
-        print(text)
         text = simple_transliterate(text.lower(), IPAS[args.script], KEEPABLES[args.script])
         return text, args.outfile
     
