@@ -21,26 +21,145 @@ SCRIPTNAME_KEEPABLE defines any characters that are okay to keep,
 untransliterated.
 """
 
+import subprocess
+
 # A set of common phonemes in English which need mappings.
 USUAL_ENGLISH_SOUNDS = [
-    'a', 'b', 'd', 'e', 'f', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 
-    'p', 'r', 's', 't', 'u', 'v', 'w', 'z', 'æ', 'ð', 'ŋ', 'ɐ', 'ɑ', 
-    'ɔ', 'ə', 'ɚ', 'ɛ', 'ɜ', 'g', 'ɪ', 'ɹ', 'ɾ', 'ʃ', 'ʊ', 'ʌ', 'ʒ', 
+    'a', 'b', 'd', 'e', 'f', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o',
+    'p', 'r', 's', 't', 'u', 'v', 'w', 'z', 'æ', 'ð', 'ŋ', 'ɐ', 'ɑ',
+    'ɔ', 'ə', 'ɚ', 'ɛ', 'ɜ', 'g', 'ɪ', 'ɹ', 'ɾ', 'ʃ', 'ʊ', 'ʌ', 'ʒ',
     'ʔ', 'ˈ', 'ˌ', 'ː', '̩', 'θ', 'ᵻ']
 
+class Transliterator:
+    """
+    Abstract class for transforming input text using a user-provided mapping.
+    This version does a replacement-based approach to phonetic scripts, and
+    should be suitable for alphabetic scripts with nearly one-to-one ratios
+    of phonemes-to-graphemes.
+    """
+
+    def __init__(self, ipa_dict, cleaner_dict, keepable_set):
+        """
+        :param ipa_dict: dictionary to map IPA characters to characters in the script.
+        :param cleaner_dict: dictionary to map IPA characters to other IPA characters.
+        :param keepable_set: set or frozenset of characters that do not need changing.
+        """
+        self.ipa = ipa_dict
+        self.cleaner = cleaner_dict
+        self.keepable = keepable_set
+        self.text = ""
+
+    def espeak(self, text, espeak="espeak"):
+        """
+        Convert some text with eSpeak.
+        :param text: string; raw English text to convert.
+        :param espeak: string; path to eSpeak executable, or command-line
+            command to run for eSpeak.
+        :return: list of IPA strings, with one string
+        """
+        # Split at newlines--eSpeak does line breaks at prosodic boundaries,
+        # so doing this lets us preserve the original line breaks.
+        text = text.split('\n')
+        # Convert to ipa with eSpeak
+        text = [
+            subprocess.run([espeak, "--punct", "-q", "--ipa", "-v", "en-us", i], stdout=subprocess.PIPE).stdout
+            for i in text
+        ]
+        text = [str(i, encoding="utf8") for i in text]
+
+        return text
+
+    def preprocess_text(self, text):
+        """
+        Perform basic preprocessing on some text.
+
+        Replaces eSpeak's reading of punctuation with actual punctuation,
+        strip stress marks, syllabic N/R marks, and replace the IPA 'g' with the
+        Latin 'g'--they're different code points, and 'g' was one that seemed to
+        commonly alternate between IPA and Latin encoding in my sources.
+
+        :param text: text to preprocess
+        :return: cleaned text
+        """
+        # Punctuation
+        text = text.replace("\n dˈɒt\n", ".")
+        text = text.replace("\n pˈiəɹɪəd\n", ".")
+        text = text.replace("\n kˈɑːmə\n", ",")
+        text = text.replace("\n kˈoʊlən\n", ":")
+        text = text.replace("\n sˌɛmɪkˈəʊlən\n", ";")
+        text = text.replace("\n sˌɛmɪkˈoʊlən\n", ";")
+        text = text.replace("\n kwˈɛstʃən\n", "?")
+        text = text.replace("\n ˌɛkskləmˈeɪʃən\n", "!")
+        text = text.replace("\n kwˈoʊt\n", "'")
+        text = text.replace("\n kwˈoʊts\n", "\"")
+        # miscellaneous symbols
+        text = text.replace("ˌ", "") # secondary stress
+        text = text.replace("ˈ", "") # primary stress
+        text = text.replace("̩", "") # syllabic marker
+        text = text.replace("ɡ", "g") # IPA 'g' to Latin 'g'
+
+        return text
+
+    def convert_text(self, text):
+        """
+        A simple .replace()-based transliteration.
+        Expects a single string in IPA input.
+
+        :param text: string; IPA text to transliterate.
+        """
+        # Run the cleaner on the text
+        for i in sorted(self.cleaner, key=len, reverse=True):
+            text = text.replace(i, self.cleaner[i])
+
+        # replace long vowels first if applicable
+        keys_1 = sorted(
+            [i.strip() for i in self.ipa.keys() if "ː" in i],
+            key=len,
+            reverse=True
+        )
+        keys_2 = sorted(
+            [i.strip() for i in self.ipa.keys() if "ː" not in i],
+            key=len,
+            reverse=True
+        )
+
+        text_old = text
+        for i in keys_1:
+            text = text.replace(i, self.ipa[i])
+        for i in keys_2:
+            text = text.replace(i, self.ipa[i])
+
+        errs = {
+            i
+            for i in set(text_old)
+            if i.strip()
+               and i in set(text)
+               and i not in self.keepable
+        }
+        # assert len(errs) == 0, "ERROR: the following characters have no defined mapping: {} \nin\n {}".format(errs, text)
+        assert len(errs) == 0, "ERROR: the following characters have no defined mapping: {}".format(errs)
+
+        return text
+
+    def transliterate(self, text, espeak="espeak"):
+        text = self.espeak(text, espeak)
+        text = map(self.preprocess_text, text)
+        text = map(self.convert_text, text)
+
+        return "\n".join(text)
 
 AVESTAN_IPA = {
-    'eː': '𐬉', 'oː': '𐬋', 'ɒ': '𐬂', 'g': '𐬔', 'ʃ': '𐬱', 'aː': '𐬁', 
-    't̚': '𐬝', 'r': '𐬭', 'ŋʲ': '𐬣', 'ɔ': '𐬊', 'uː': '𐬏', 'z': '𐬰', 
-    'ʊ': '𐬎', 'h': '𐬵', 'ŋ': '𐬧', 'mʰ': '𐬩', 'β': '𐬡', 'm̥': '𐬩', 
-    'ɲ': '𐬦', 'e': '𐬈', 'j': '𐬫', 'ɒː': '𐬃', 'd': '𐬛', 'a': '𐬀', 
-    'gʲ': '𐬕', 's': '𐬯', 'ɟ': '𐬕', 'b': '𐬠', 'uu̯': '𐬎𐬎', 't': '𐬙', 
-    'ʒ': '𐬲', 'tʃ': '𐬗', 'p': '𐬞', 'iː': '𐬍', 'v': '𐬬', 'ɪ': '𐬌', 
-    'əː': '𐬇', 'ç': '𐬒', 'dʒ': '𐬘', 'xʷ': '𐬓', 'f': '𐬟', 'θ': '𐬚', 
-    'ii̯': '𐬌𐬌', 'xʲ': '𐬒', 'x': '𐬑', 'ã': '𐬅', 'ð': '𐬜', 'm': '𐬨', 
+    'eː': '𐬉', 'oː': '𐬋', 'ɒ': '𐬂', 'g': '𐬔', 'ʃ': '𐬱', 'aː': '𐬁',
+    't̚': '𐬝', 'r': '𐬭', 'ŋʲ': '𐬣', 'ɔ': '𐬊', 'uː': '𐬏', 'z': '𐬰',
+    'ʊ': '𐬎', 'h': '𐬵', 'ŋ': '𐬧', 'mʰ': '𐬩', 'β': '𐬡', 'm̥': '𐬩',
+    'ɲ': '𐬦', 'e': '𐬈', 'j': '𐬫', 'ɒː': '𐬃', 'd': '𐬛', 'a': '𐬀',
+    'gʲ': '𐬕', 's': '𐬯', 'ɟ': '𐬕', 'b': '𐬠', 'uu̯': '𐬎𐬎', 't': '𐬙',
+    'ʒ': '𐬲', 'tʃ': '𐬗', 'p': '𐬞', 'iː': '𐬍', 'v': '𐬬', 'ɪ': '𐬌',
+    'əː': '𐬇', 'ç': '𐬒', 'dʒ': '𐬘', 'xʷ': '𐬓', 'f': '𐬟', 'θ': '𐬚',
+    'ii̯': '𐬌𐬌', 'xʲ': '𐬒', 'x': '𐬑', 'ã': '𐬅', 'ð': '𐬜', 'm': '𐬨',
     'n': '𐬥', 'ə': '𐬆', 'ŋʷ': '𐬤', 'ʂ': '𐬴', 'ɕ': '𐬳', 'k': '𐬐', 'l':'𐬮',
     'w':'𐬎𐬎', ".":"𐬽", ";":"𐬻", ":":"",
-    
+
     # some custom ones, since cleaning with .replace would be too hard
     'i': '𐬍', 'u':'𐬏', 'o':'𐬋', 'ɔː': '𐬊',
 }
@@ -56,7 +175,7 @@ AVESTAN_CLEANER = {
     "ɚ":"ər",
     "ɾ":"d", # trilled R already used for rhotic, so flap to d, I guess
     "n̩":"n",
-    "ʔ":"", # no good glottal stop representation    
+    "ʔ":"", # no good glottal stop representation
     "?":"",
     ",":"",
     "!":"",
@@ -66,7 +185,7 @@ AVESTAN_KEEPABLE = frozenset({
 })
 
 GEORGIAN_CLEANER = {
-    "ɚ":"ər", 
+    "ɚ":"ər",
     "ɹ":"r",
     "ɜ":"ɛr",
     "ʌ":"ə",
@@ -137,13 +256,13 @@ TIFINAGH_CLEANER = {
     ":":"",
     "ᵻ":"i",
     "ɹ":"r",
-    "ɐ":"a", 
-    "ɜ":"er", 
+    "ɐ":"a",
+    "ɜ":"er",
     "ɾ":"d",
     "ɛ":"e",
-    "ɚ":"er", 
+    "ɚ":"er",
     "ɪ":"i",
-    "ɔ":"o", 
+    "ɔ":"o",
     "ɑ":"a",
     "ʔ":"",
     "!":".", # looks too much like ng letter
@@ -195,7 +314,7 @@ TIFINAGH_IPA = {
     "v":"ⵠ",
     "u":"ⵓ", # originally w
     "w":"ⵡ",
-    "ʷ":" ⵯ",
+    "ʷ":" ⵯ",
     "x":"ⴿ",
     "z":"ⵣ",
     # "z":"ⵤ",
@@ -246,7 +365,7 @@ ELDER_FUTHARK_IPA = {
 }
 ELDER_FUTHARK_CLEANER = {
     "ː":"",
-    "ɚ":"er", 
+    "ɚ":"er",
     "ɹ":"r",
     "ɜ":"er",
     "ʌ":"u",
@@ -282,7 +401,7 @@ MEDEIVAL_RUNES_IPA = {
     'm':'ᛘ',
     'n':'ᚿ',
     'o':'ᚮ',
-    'p':'ᛕ',
+    # 'p':'ᛕ',
     'p':'ᛔ',
     'q':'ᛩ',
     'r':'ᚱ',
@@ -290,19 +409,19 @@ MEDEIVAL_RUNES_IPA = {
     't':'ᛐ',
     'u':'ᚢ',
     'v':'ᚡ',
-    'v':'ᚢ',
+    # 'v':'ᚢ',
     'w':'ᚥ',
     'x':'ᛪ',
-    'y':'ᚤ',
+    # 'y':'ᚤ',
     'y':'ᛨ',
-    'y':'ᛦ',
+    # 'y':'ᛦ',
     'z':'ᛎ',
     'th':'ᚦ',
 }
 MEDEIVAL_RUNES_CLEANER = {
     "j":"i",
 }
-MEDEIVAL_RUNES_KEEPABLE = frozenset({';', '!', '?', ':', '.', ','})
+MEDEIVAL_RUNES_KEEPABLE = frozenset({';', '!', '?', ':', '.', ',', '-'})
 
 MONGOLIAN_IPA = {
     'a':'ᠠ',
@@ -357,19 +476,19 @@ MONGOLIAN_IPA = {
 MONGOLIAN_CLEANER = {
     ";":"",
     'ə':"ɵ",
-    'ɚ':'ɵr', 
-    'æ':'a', 
-    'ː':':', 
-    'ɑ':'a', 
-    'ɐ':'a', 
-    'ʔ':'', 
-    'ɜ':'er', 
-    'ᵻ':'i', 
-    'ɔ':'o', 
+    'ɚ':'ɵr',
+    'æ':'a',
+    'ː':':',
+    'ɑ':'a',
+    'ɐ':'a',
+    'ʔ':'',
+    'ɜ':'er',
+    'ᵻ':'i',
+    'ɔ':'o',
     'ɾ':'d',
     "!":"",
     "?":"",
-        
+
 }
 MONGOLIAN_KEEPABLE = frozenset({})
 
@@ -422,15 +541,15 @@ PHAGSPA_IPA = {
 }
 PHAGSPA_CLEANER = {
     ":":"",
-    'æ':'a', 
+    'æ':'a',
     'ɜ':'er',
-    'ɪ':'i', 
-    'ɹ':'r', 
-    'ː':'', 
-    'ɾ':'r', 
-    'ɔ':'a', 
-    'ʊ':'u', 
-    'ɑ':'a', 
+    'ɪ':'i',
+    'ɹ':'r',
+    'ː':'',
+    'ɾ':'r',
+    'ɔ':'a',
+    'ʊ':'u',
+    'ɑ':'a',
     'a':'a',
     'ɐ':'a',
     'ə':'ʌ',
@@ -444,6 +563,71 @@ PHAGSPA_CLEANER = {
     "?":"",
 }
 PHAGSPA_KEEPABLE = frozenset({})
+
+GLAGOLITIC_IPA = {
+'ɑ':'Ⰰ',
+'b':'Ⰱ',
+'w':'Ⰲ', # originally ʋ
+'g':'Ⰳ',
+'d':'Ⰴ',
+'ɛ':'Ⰵ',
+'ʒ':'Ⰶ',
+'d͡z':'Ⰷ',
+'z':'Ⰸ',
+#'j':'Ⰹ',
+#'i':'Ⰹ',
+#'j':'Ⰺ',
+'i':'Ⰺ',
+#'i':'Ⰻ',
+'j':'Ⰻ',
+'d͡ʑ':'Ⰼ',
+'k':'Ⰽ',
+'l':'Ⰾ',
+'m':'Ⰿ',
+'nj':'Ⱀ',
+'n':'Ⱀ',
+'ɔ':'Ⱁ',
+'p':'Ⱂ',
+'r':'Ⱃ',
+'s':'Ⱄ',
+'t':'Ⱅ',
+'u':'Ⱆ',
+'f':'Ⱇ',
+'h':'Ⱈ', # originally x
+'ɔ':'Ⱉ',
+'ð':'Ⱋ', # originally tj/ʃt
+'t͡s':'Ⱌ',
+'t͡ʃ':'Ⱍ',
+'ʃ':'Ⱎ',
+'ʌ':'Ⱏ', # originally ɯ
+'ᵻ':'ⰟⰉ',
+'ə':'Ⱐ',
+'jɑ':'Ⱑ',
+'æ':'Ⱑ',
+'o':'Ⱖ', # originally jo
+'ju':'Ⱓ',
+'e':'Ⱔ',# originally ɛ̃
+'jɛ̃':'Ⱗ',
+'ɔ̃':'Ⱘ',
+'jɔ̃':'Ⱙ',
+'θ':'Ⱚ',
+'ɪ':'Ⱛ', # originally small-Y
+}
+GLAGOLITIC_CLEANER = {
+    'ɡ':'g',
+    'a':'ɑ',
+    'ɐ':'ɑ',
+    'ɜ':'ɛ',
+    'ː':'',
+    'ɚ':'ər',
+    'ʊ':'u',
+    'ʔ':'',
+    'ɹ':'r',
+    'v':'w',
+    'ŋ':'ng',
+    'ɾ':'d',
+}
+GLAGOLITIC_KEEPABLE = set(".,;':\"?!")
 
 # collect languages into a dict to more programmatically reference
 # them later
