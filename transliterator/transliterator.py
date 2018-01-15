@@ -19,6 +19,7 @@ Requires no third-party Python libraries.
 
 import argparse
 from copy import deepcopy
+from collections import deque
 import re
 import sys
 import subprocess
@@ -155,7 +156,8 @@ class Transliterator:
 class MedeivalRunes(Transliterator):
     """
     Special class for medeival runes transliteration--skip all the IPA nonsense
-    and convert directly from the raw text.
+    and convert directly from the raw text, since there's a 1:1 mapping of those
+    runes to the original Latin characters.
     """
 
     def transliterate(self, text, espeak="espeak", is_ipa=False):
@@ -164,9 +166,33 @@ class MedeivalRunes(Transliterator):
 class CanadianSyllabics(Transliterator):
     """
     Special class for working with Canadian Aboriginal Syllabics.
-    Looks for any sequence of CV(V) and replaces these first, assuming
-    that these are always syllable heads; 
+    Accumulates phonemes in a buffer, clearing the buffer and ouputting
+    the corresponding transliterated text once adding a character results
+    in a string that does not map to any valid grapheme.
+    
+    This also allows a default script to be specified, e.g. "blackfoot"
+    for Blackfoot syllabics.  It attempts to do the transliteration
+    using that script first, falling back to the general syllabics
+    if it doesn't find a valid character.
     """
+    
+    def convert_text(self, text, is_ipa=False, script="GENERAL"):
+        # Run the cleaner on the text
+        for i in sorted(self.cleaner, key=len, reverse=True):
+            text = text.replace(i, self.cleaner[i])
+        
+        out = ""
+        buffer = ""
+        MAXLEN = max(len(i) for i in self.ipa.keys())
+        for i in text:
+            buffer += i
+            if buffer not in self.ipa:
+                out += self.ipa[buffer[:-1]]
+                buffer = ""
+            if len(buffer) > MAXLEN:
+                raise ValueError("buffer size has grown too large.  Current contents: {}".format(buffer))
+        
+        return out
 
 def main():
     TRANSLITERATORS = {
@@ -265,8 +291,13 @@ def main():
 
     # for outputting stuff to a .tex file--uses some macros I've defined,
     # so this probably won't work and isn't needed for you.
-    # text_final = "\n\n".join("{{{}}}\n&\n{{\\tifinagh {}}} \\\\".format(i.strip(),j.strip()) for i,j in zip(orig, text))
-
+    text_final ="\\begin{longtable}{p{7.5cm} p{7.5cm}}\n\tENGLISH & TIFINAGH\\\\\n\n" \
+        + "\n\n".join(
+            "\t{{{}}}\n\t&\n\t{{{}}} \\\\".format(i.strip(),j.strip()) 
+            for i,j in zip(orig.split('\n')[:-1], text_final.split('\n')[:-1])
+        ) \
+        + "\n\\end{longtable}"
+        
     if args.outfile:
         with open(args.outfile, "w", encoding="utf8") as F:
             F.write(text_final)
